@@ -1,0 +1,107 @@
+name: Build LLVM with ClangIR
+
+env:
+    # ClangIR moves fast upstream, so track main unless a ref is given
+    LLVM_REF: ${{ inputs.llvm_ref || 'main' }}
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+    inputs:
+      llvm_ref:
+        description: "llvm-project branch, tag or commit"
+        default: "main"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.OS }} (${{ matrix.ARCH }})
+    runs-on: ${{ matrix.RUNNER }}
+    # Hosted runner maximum; a cold build (empty ccache) takes several hours
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+            - ARCH: x86_64
+              RUNNER: ubuntu-24.04
+              OS: Linux
+            - ARCH: aarch64
+              RUNNER: ubuntu-24.04-arm
+              OS: Linux
+            - ARCH: aarch64
+              RUNNER: macos-latest
+              OS: Darwin
+    env:
+        PACKAGE: clangir-${{ matrix.OS }}-${{ matrix.ARCH }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Free disk space
+        if: matrix.OS == 'Linux'
+        run: |
+            # LLVM + clang + mlir needs more than the ~14GB free by default
+            sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+            df -h /
+      - uses: hendrikmuhs/ccache-action@v1.2.24
+        with:
+            # One cache per platform; all three must fit GitHub's 10GB repo limit
+            key: ${{ matrix.OS }}-${{ matrix.ARCH }}
+            max-size: "3000MB"
+      - uses: actions/checkout@v7
+        with:
+            repository: 'llvm/llvm-project'
+            ref: ${{ env.LLVM_REF }}
+            path: 'llvm'
+      - name: Install deps
+        if: matrix.OS == 'Linux'
+        run: |
+            sudo apt-get update
+            sudo apt-get install -y ninja-build
+      - name: Build
+        run: |
+            extra=()
+            if [ "${{ matrix.OS }}" = "Darwin" ]; then
+                # Let the installed clang find the SDK without xcrun, like Homebrew's
+                extra+=(-DDEFAULT_SYSROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk)
+            fi
+            cmake -G Ninja \
+                -B build.dir \
+                -C ClangIR.cmake \
+                llvm/llvm \
+                -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/${{ env.PACKAGE }} \
+                "${extra[@]}"
+            cmake --build build.dir
+            cmake --build build.dir --target install/strip
+            git -C llvm rev-parse HEAD > ${{ env.PACKAGE }}/LLVM_REVISION
+      - name: Smoke test
+        run: |
+            cat > test.c <<'EOF'
+            int add(int a, int b) { return a + b; }
+            int main(void) { return add(1, 2) - 3; }
+            EOF
+            clang=${{ env.PACKAGE }}/bin/clang
+            $clang --version
+            $clang -fclangir -emit-cir test.c -o test.cir
+            grep -q "cir.func" test.cir
+            $clang -fclangir -emit-llvm -S test.c -o test.ll
+            $clang -fclangir test.c -o test
+            ./test
+      - name: Package
+        env:
+            XZ_OPT: "-T0 -6"
+        run: |
+            tar=$(command -v gtar || command -v tar)
+            $tar -cJf ${{ env.PACKAGE }}.tar.xz ${{ env.PACKAGE }}
+            ls -lh ${{ env.PACKAGE }}.tar.xz
+      - uses: actions/upload-artifact@v4
+        with:
+            name: ${{ env.PACKAGE }}
+            path: ${{ env.PACKAGE }}.tar.xz
+            # Already xz-compressed
+            compression-level: 0
