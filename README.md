@@ -23,3 +23,28 @@ clang -fclangir test.c -o test                 # compile through ClangIR
 ```
 
 The configuration lives in `ClangIR.cmake`.
+
+## CIR pass plugins
+
+`patches/` is applied on top of llvm-project. It adds
+`clang/CIR/CIRPassPlugin.h`: a plugin loaded with `-fplugin=` can register
+passes that run on the CIR module right after CIRGen, before the built-in
+CIR-to-CIR pipeline. It also keeps `mlir::`/`cir::` symbols exported from
+`libclang-cpp`, so the plugin links against it alone.
+
+```cpp
+struct MyPlugin : cir::CIRPassPlugin {
+  void registerPasses(mlir::OpPassManager &pm) override {
+    pm.addPass(std::make_unique<MyModulePass>());              // whole TU
+    pm.addNestedPass<cir::FuncOp>(std::make_unique<MyFuncPass>()); // per function
+  }
+};
+static cir::CIRPassPluginRegistry::Add<MyPlugin> X("my-plugin", "...");
+```
+
+```sh
+clang -fclangir -fplugin=libmy-plugin.so -c test.c
+```
+
+`tests/cir-pass-plugin` is a minimal plugin (rewrites `cir.add` into
+`cir.sub`) that CI builds against each toolchain to check the integration.

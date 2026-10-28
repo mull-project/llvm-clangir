@@ -62,6 +62,11 @@ jobs:
             repository: 'llvm/llvm-project'
             ref: ${{ env.LLVM_REF }}
             path: 'llvm'
+      - name: Apply patches
+        run: |
+            for p in patches/*.patch; do
+                git -C llvm apply --verbose "../$p"
+            done
       - name: Install deps
         if: matrix.OS == 'Linux'
         run: |
@@ -101,6 +106,17 @@ jobs:
             $clang -fclangir -emit-llvm -S test.c -o test.ll
             $clang -fclangir test.c -o test
             ./test
+            # CIR pass plugin: add(1, 2) - 3 becomes (1 - 2) - 3
+            cmake -B plugin.dir -S tests/cir-pass-plugin \
+                -DCMAKE_CXX_COMPILER=${{ github.workspace }}/${{ env.PACKAGE }}/bin/clang++ \
+                -DCMAKE_PREFIX_PATH=${{ github.workspace }}/${{ env.PACKAGE }}
+            cmake --build plugin.dir
+            plugin=$(ls plugin.dir/*add-to-sub.*)
+            $clang -fclangir -fplugin=$plugin test.c -o test-mutated 2> plugin.log
+            cat plugin.log
+            grep -q "cir.add -> cir.sub" plugin.log
+            ./test-mutated && status=0 || status=$?
+            test "$status" -eq 252
       - name: Package
         env:
             XZ_OPT: "-T0 -6"
