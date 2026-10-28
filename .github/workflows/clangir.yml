@@ -15,9 +15,13 @@ on:
         description: "llvm-project branch, tag or commit"
         default: "main"
 
+permissions:
+  contents: write # upload release assets
+
+# Each non-PR run publishes a release, so only cancel superseded PR runs
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
@@ -85,6 +89,11 @@ jobs:
             int add(int a, int b) { return a + b; }
             int main(void) { return add(1, 2) - 3; }
             EOF
+            if [ "${{ matrix.OS }}" = "Darwin" ]; then
+                # DEFAULT_SYSROOT is the CommandLineTools SDK; link with its ld
+                # too, the runner's default Xcode ld can be older than that SDK
+                export DEVELOPER_DIR=/Library/Developer/CommandLineTools
+            fi
             clang=${{ env.PACKAGE }}/bin/clang
             $clang --version
             $clang -fclangir -emit-cir test.c -o test.cir
@@ -105,3 +114,12 @@ jobs:
             path: ${{ env.PACKAGE }}.tar.xz
             # Already xz-compressed
             compression-level: 0
+      - name: Publish
+        if: github.event_name != 'pull_request'
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: ${{ env.PACKAGE }}.tar.xz
+          tag: ${{ github.run_id }}
+          overwrite: true
+          target_commit: ${{ github.sha }}

@@ -5,7 +5,9 @@ enabled (`-DCLANG_ENABLE_CIR=ON`), which neither Homebrew nor apt.llvm.org
 ship.
 
 Each CI run uploads a GitHub Actions artifact per platform (`Darwin-aarch64`,
-`Linux-aarch64`, `Linux-x86_64`) containing `clangir-<OS>-<ARCH>.tar.xz`: an
+`Linux-aarch64`, `Linux-x86_64`), and runs on `main` or started manually also
+publish them as a release tagged with the workflow run id. Each one is
+`clangir-<OS>-<ARCH>.tar.xz`: an
 install tree of LLVM, clang and MLIR with headers, `libLLVM`, `libclang-cpp`,
 CMake configs and the LLVM utilities (`FileCheck`, ...). The exact
 llvm-project commit is in `LLVM_REVISION`.
