@@ -6,5 +6,5 @@ find_package(Clang REQUIRED CONFIG)
 
 add_library(add-to-sub MODULE AddToSub.cpp)
 target_include_directories(add-to-sub PRIVATE ${LLVM_INCLUDE_DIRS} ${CLANG_INCLUDE_DIRS})
-# clang, cir and mlir all come from the host's libclang-cpp
-target_link_libraries(add-to-sub PRIVATE clang-cpp)
+# clang, cir and mlir come from the host's libclang-cpp, llvm from libLLVM
+target_link_libraries(add-to-sub PRIVATE clang-cpp LLVM)
